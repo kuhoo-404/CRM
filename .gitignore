@@ -1,0 +1,58 @@
+# Python
+
+**pycache**/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual Environments
+
+venv/
+.env/
+.venv/
+
+# Environment Variables
+
+.env
+
+# FastAPI / Logs
+
+*.log
+
+# VS Code
+
+.vscode/
+
+# JetBrains
+
+.idea/
+
+# OS Files
+
+.DS_Store
+Thumbs.db
+
+# Python Packaging
+
+build/
+dist/
+*.egg-info/
+
+# Frontend
+
+node_modules/
+frontend/node_modules/
+
+# Vite
+
+frontend/dist/
+
+# Testing
+
+.pytest_cache/
+.coverage
+
+# Database
+
+*.db
+*.sqlite3
