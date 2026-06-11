@@ -1,35 +1,32 @@
-from app.services.ingest_service import load_emails
+from sqlalchemy.orm import Session
+from app.models import Contact
+from app.models.contact import ContactStatus
+from app.utils.exceptions import ContactNotFoundError
 
 
-def get_contacts():
+def get_contact(email: str, db: Session) -> Contact:
+    contact = db.query(Contact).filter(Contact.email == email).first()
+    if not contact:
+        raise ContactNotFoundError(email)
+    return contact
 
-    emails = load_emails()
 
-    contacts = {}
+def get_all_contacts(db: Session) -> list:
+    return db.query(Contact).order_by(Contact.last_contact_at.desc()).all()
 
-    for email in emails:
 
-        sender = email["sender"]
-
-        if sender not in contacts:
-
-            contacts[sender] = {
-                "email": sender,
-                "message_count": 0,
-                "threads": set()
-            }
-
-        contacts[sender]["message_count"] += 1
-        contacts[sender]["threads"].add(email["thread_id"])
-
-    result = []
-
-    for contact in contacts.values():
-
-        result.append({
-            "email": contact["email"],
-            "message_count": contact["message_count"],
-            "thread_count": len(contact["threads"])
-        })
-
-    return result
+def update_contact_status(email: str, new_status: str, db: Session) -> Contact:
+    contact = db.query(Contact).filter(Contact.email == email).first()
+    if not contact:
+        raise ContactNotFoundError(email)
+    try:
+        contact.status = ContactStatus(new_status)
+    except ValueError:
+        from app.utils.exceptions import ValidationError
+        raise ValidationError(
+            f"Invalid status '{new_status}'",
+            details={"allowed": [s.value for s in ContactStatus]}
+        )
+    db.commit()
+    db.refresh(contact)
+    return contact
