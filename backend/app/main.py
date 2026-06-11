@@ -10,9 +10,8 @@ from app.utils.exceptions import CRMException
 # Import all models so Base.metadata knows about them before create_all
 import app.models  # noqa: F401
 
-from app.routers import ingest, threads, contacts, dashboard
-from app.routers import ingest, threads, contacts, dashboard, rag
-from app.routers import ingest, threads, contacts, dashboard, rag, agent
+
+from app.routers import ingest, threads, contacts, dashboard, rag, agent, respond
 
 settings = get_settings()
 logging.basicConfig(level=settings.LOG_LEVEL)
@@ -71,7 +70,7 @@ app.include_router(contacts.router)
 app.include_router(dashboard.router)
 app.include_router(rag.router)
 app.include_router(agent.router)
-
+app.include_router(respond.router)
 @app.get("/")
 def root():
     return {"message": "SenAI CRM Backend", "docs": "/docs", "version": "1.0.0"}
