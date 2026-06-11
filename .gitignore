@@ -56,3 +56,23 @@ frontend/dist/
 
 *.db
 *.sqlite3
+# ChromaDB vector store
+chroma_db/
+
+# Alembic
+migrations/versions/__pycache__/
+
+# PostgreSQL
+*.sql
+
+# Secrets
+*.env
+.env.*
+!.env.example
+
+# Python compiled
+__pycache__/
+*.pyc
+
+# Byte-compiled
+*.pyo

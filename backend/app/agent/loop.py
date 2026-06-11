@@ -1,14 +1,14 @@
 """
 ReAct Agent Loop
 ================
-Implements the Thought → Action → Observation cycle.
+Implements the Thought → Action → Observation cycle using Groq.
 
 Flow:
   1. Build context (email + thread history + RAG chunks)
-  2. Call Gemini with ReAct system prompt
+  2. Call Groq with ReAct system prompt
   3. Parse response → extract tool calls
   4. Dispatch tool calls one by one
-  5. Feed observations back to Gemini for next step
+  5. Feed observations back for next step
   6. Repeat up to MAX_STEPS
   7. Store full reasoning trace in actions table
   8. Return structured result
@@ -25,7 +25,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-import google.generativeai as genai
+from groq import Groq
 
 from app.config import get_settings
 from app.agent.prompts import REACT_SYSTEM_PROMPT, REACT_USER_TEMPLATE
@@ -44,21 +44,15 @@ SIDE_EFFECT_TOOLS = {
     "send_auto_reply",
 }
 
-# These email types must NEVER receive an auto-reply — enforced here too
-NEVER_AUTO_REPLY_CONDITIONS = {
-    "is_spam": True,
-    "is_security_threat": True,
-}
-
 
 class AgentLoop:
 
     def __init__(self, db, rag_service):
         self.db = db
         self.rag = rag_service
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel("gemini-2.0-flash")
-        self.tools = AgentTools(db=db, rag_service=rag_service, gemini_model=self.model)
+        # ── Groq client ───────────────────────────────────────────────────────
+        self._groq = Groq(api_key=settings.GROQ_API_KEY)
+        self.tools = AgentTools(db=db, rag_service=rag_service, groq_client=self._groq)
 
     # ── Public entrypoint ─────────────────────────────────────────────────────
 
@@ -66,7 +60,6 @@ class AgentLoop:
         """
         Run the agent on a single email.
         dry_run=True → plans only, no DB writes, no sends.
-
         Returns a structured result dict with the full reasoning trace.
         """
         from app.models.email import Email
@@ -85,7 +78,6 @@ class AgentLoop:
             }
 
         # ── Pre-flight safety checks ──────────────────────────────────────────
-        # These are absolute — no LLM call needed, just route immediately
         if email.is_spam:
             return self._safe_exit(
                 email, dry_run,
@@ -103,7 +95,7 @@ class AgentLoop:
         rag_results = self.rag.retrieve(rag_query, top_k=3)
         rag_context = self._format_rag_context(rag_results)
 
-        # ── Build initial prompt ──────────────────────────────────────────────
+        # ── Build initial user message ────────────────────────────────────────
         user_message = REACT_USER_TEMPLATE.format(
             message_id=email.message_id,
             sender=email.sender,
@@ -124,11 +116,12 @@ class AgentLoop:
         )
 
         # ── ReAct loop ────────────────────────────────────────────────────────
-        reasoning_trace = []
+        # conversation_history uses OpenAI/Groq format: role = "user" | "assistant"
         conversation_history = [
-            {"role": "user", "parts": [user_message]},
+            {"role": "user", "content": user_message}
         ]
 
+        reasoning_trace = []
         final_answer = None
         action_taken = "Ignored"
         draft_reply = None
@@ -138,11 +131,11 @@ class AgentLoop:
             steps_used += 1
             logger.info(f"Agent step {step + 1}/{MAX_STEPS} for {email.message_id}")
 
-            # Call Gemini
+            # ── Call LLM ──────────────────────────────────────────────────────
             try:
-                raw_response = self._call_gemini(conversation_history)
+                raw_response = self._call_llm(conversation_history)
             except Exception as e:
-                logger.error(f"Gemini call failed on step {step + 1}: {e}")
+                logger.error(f"LLM call failed on step {step + 1}: {e}")
                 reasoning_trace.append({
                     "step": step + 1,
                     "thought": f"LLM call failed: {str(e)}",
@@ -152,11 +145,10 @@ class AgentLoop:
                 })
                 break
 
-            # Parse the response
+            # ── Parse response ────────────────────────────────────────────────
             parsed = self._parse_response(raw_response)
 
             if parsed is None:
-                # Gemini returned unparseable output — add to trace and break
                 reasoning_trace.append({
                     "step": step + 1,
                     "thought": "Failed to parse LLM response",
@@ -166,14 +158,13 @@ class AgentLoop:
                 })
                 break
 
-            # Extract steps from parsed response
-            steps = parsed.get("steps", [])
+            steps_in_response = parsed.get("steps", [])
             final_answer = parsed.get("final_answer")
             action_taken = parsed.get("action_taken", "Ignored")
             draft_reply = parsed.get("draft_reply")
 
-            # Process each step in the response
-            for step_data in steps:
+            # ── Process each step in the parsed response ──────────────────────
+            for step_data in steps_in_response:
                 thought = step_data.get("thought", "")
                 action_name = step_data.get("action")
                 args = step_data.get("args", {})
@@ -187,37 +178,40 @@ class AgentLoop:
                 }
 
                 if action_name:
-                    # Execute the tool (or simulate in dry-run)
                     observation = self._dispatch_tool(
                         action_name, args, email, dry_run
                     )
                     step_record["observation"] = observation
 
-                    # Feed observation back for next iteration
-                    observation_message = (
-                        f"Observation from {action_name}: {observation}"
-                    )
-                    conversation_history.append(
-                        {"role": "model", "parts": [json.dumps(parsed)]}
-                    )
-                    conversation_history.append(
-                        {"role": "user", "parts": [
-                            f"The tool returned this observation:\n{observation}\n\n"
+                    # Feed observation back into conversation
+                    conversation_history.append({
+                        "role": "assistant",
+                        "content": json.dumps(parsed),
+                    })
+                    conversation_history.append({
+                        "role": "user",
+                        "content": (
+                            f"The tool '{action_name}' returned this observation:\n"
+                            f"{observation}\n\n"
                             f"Continue reasoning. If you have completed your task, "
                             f"provide your final_answer."
-                        ]}
-                    )
+                        ),
+                    })
 
                 reasoning_trace.append(step_record)
 
-            # If Gemini returned a final_answer, we're done
+            # If LLM returned a final_answer we are done
             if final_answer:
-                logger.info(f"Agent completed in {steps_used} steps for {email.message_id}")
+                logger.info(
+                    f"Agent completed in {steps_used} steps for {email.message_id}"
+                )
                 break
 
         else:
             # Exhausted MAX_STEPS without resolution — force escalation
-            logger.warning(f"Agent hit MAX_STEPS ({MAX_STEPS}) for {email.message_id} — forcing escalation")
+            logger.warning(
+                f"Agent hit MAX_STEPS ({MAX_STEPS}) for {email.message_id} — forcing escalation"
+            )
             final_answer = (
                 f"Agent exhausted {MAX_STEPS} steps without full resolution. "
                 f"Escalating to human with reasoning summary."
@@ -288,42 +282,48 @@ class AgentLoop:
             "draft_reply": draft_reply,
             "reasoning_trace": reasoning_trace,
             "rag_chunks_used": [
-                {"source": r["source_doc"], "score": r["score"]}
+                {
+                    "source": r.get("source_doc", r.get("source", "unknown")),
+                    "score": r.get("similarity_score", r.get("score", 0.0)),
+                }
                 for r in rag_results
             ],
         }
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _call_gemini(self, conversation_history: list) -> str:
-        """Call Gemini with the full conversation history."""
-        chat = self.model.start_chat(history=conversation_history[:-1])
-        last_message = conversation_history[-1]["parts"][0]
+    def _call_llm(self, conversation_history: list) -> str:
+        """
+        Call Groq with the full conversation history.
+        System prompt is always prepended as the first message.
+        """
+        messages = [{"role": "system", "content": REACT_SYSTEM_PROMPT}]
+        messages.extend(conversation_history)
 
-        # Prepend system prompt to first call
-        if len(conversation_history) == 1:
-            full_message = f"{REACT_SYSTEM_PROMPT}\n\n{last_message}"
-        else:
-            full_message = last_message
-
-        response = chat.send_message(full_message)
-        return response.text
+        response = self._groq.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            max_tokens=2048,
+            temperature=0.1,  # low temp = more consistent JSON output
+        )
+        return response.choices[0].message.content
 
     def _parse_response(self, raw: str) -> Optional[dict]:
         """
-        Parse Gemini's JSON response.
-        Handles markdown code fences and minor formatting issues.
+        Parse the LLM JSON response.
+        Handles markdown code fences and extracts embedded JSON.
         """
         try:
-            # Strip markdown fences if present
             cleaned = raw.strip()
+            # Strip markdown fences
             if cleaned.startswith("```"):
                 lines = cleaned.split("\n")
-                # Remove first line (```json or ```) and last line (```)
-                cleaned = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
+                cleaned = "\n".join(
+                    lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
+                )
             return json.loads(cleaned)
         except json.JSONDecodeError:
-            # Try extracting JSON from within the text
+            # Try extracting JSON substring
             try:
                 start = raw.find("{")
                 end = raw.rfind("}") + 1
@@ -357,14 +357,13 @@ class AgentLoop:
                 return "BLOCKED: Cannot auto-reply to legally flagged email"
 
         if dry_run and tool_name in SIDE_EFFECT_TOOLS:
-            return f"[DRY RUN] Would call {tool_name}({args}) — not executed"
+            return f"[DRY RUN] Would call {tool_name}({json.dumps(args)}) — not executed"
 
         tool_fn = self.tools.get_tool(tool_name)
         if not tool_fn:
             return f"Unknown tool: {tool_name}"
 
         try:
-            # Call the tool with unpacked args
             return tool_fn(**args)
         except TypeError as e:
             return f"Tool {tool_name} called with wrong args: {e}"
@@ -373,11 +372,15 @@ class AgentLoop:
             return f"Tool {tool_name} failed: {str(e)}"
 
     def _format_rag_context(self, results: list) -> str:
+        """Format RAG results — handles both key naming conventions."""
         if not results:
             return "No relevant policy context found."
         parts = []
         for r in results:
-            parts.append(f"[{r['source_doc']} | similarity: {r['score']:.2f}]\n{r['text']}")
+            source = r.get("source_doc", r.get("source", "unknown"))
+            score = r.get("similarity_score", r.get("score", 0.0))
+            text = r.get("chunk_text", r.get("text", ""))
+            parts.append(f"[{source} | similarity: {score:.2f}]\n{text}")
         return "\n\n---\n\n".join(parts)
 
     def _safe_exit(self, email, dry_run: bool, reason: str, action_type) -> dict:
@@ -388,7 +391,11 @@ class AgentLoop:
                 action = Action(
                     id=str(uuid.uuid4()),
                     email_id=email.id,
-                    agent_reasoning_log=[{"thought": reason, "action": "none", "observation": "skipped"}],
+                    agent_reasoning_log=[{
+                        "thought": reason,
+                        "action": "none",
+                        "observation": "skipped",
+                    }],
                     action_type=action_type,
                     is_approved=True,
                     approved_by="agent",
@@ -407,14 +414,18 @@ class AgentLoop:
             "action_taken": "Ignored",
             "final_answer": reason,
             "draft_reply": None,
-            "reasoning_trace": [{"thought": reason, "action": "none", "observation": "skipped"}],
+            "reasoning_trace": [{
+                "thought": reason,
+                "action": "none",
+                "observation": "skipped",
+            }],
             "rag_chunks_used": [],
         }
 
     def _handle_security_threat(self, email, dry_run: bool) -> dict:
         """
         Hard-coded handler for ransomware / security threats.
-        No LLM involved — route immediately to security queue.
+        No LLM involved — deterministic routing.
         NEVER auto-reply.
         """
         from app.models.action import Action, ActionType
@@ -426,10 +437,13 @@ class AgentLoop:
                 "thought": (
                     "This email is flagged as a security threat (ransomware/extortion/suspicious login). "
                     "Per absolute rules: route to security queue immediately, NEVER auto-reply, "
-                    "flag_for_legal, notify CISO. No LLM reasoning needed — this is deterministic."
+                    "flag_for_legal, notify CISO. No LLM reasoning needed — deterministic path."
                 ),
                 "action": "flag_for_legal",
-                "args": {"email_id": email.message_id, "issue_type": "Security threat / ransomware / extortion"},
+                "args": {
+                    "email_id": email.message_id,
+                    "issue_type": "Security threat / ransomware / extortion",
+                },
                 "observation": None,
             },
             {
@@ -465,7 +479,7 @@ class AgentLoop:
                     email_id=email.id,
                     agent_reasoning_log=reasoning_trace,
                     action_type=ActionType.legal_flag,
-                    proposed_content=None,   # NEVER generate a reply
+                    proposed_content=None,  # NEVER generate a reply
                     is_approved=True,
                     approved_by="agent",
                     executed_at=datetime.now(timezone.utc),

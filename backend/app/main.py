@@ -12,6 +12,7 @@ import app.models  # noqa: F401
 
 from app.routers import ingest, threads, contacts, dashboard
 from app.routers import ingest, threads, contacts, dashboard, rag
+from app.routers import ingest, threads, contacts, dashboard, rag, agent
 
 settings = get_settings()
 logging.basicConfig(level=settings.LOG_LEVEL)
@@ -69,6 +70,7 @@ app.include_router(threads.router)
 app.include_router(contacts.router)
 app.include_router(dashboard.router)
 app.include_router(rag.router)
+app.include_router(agent.router)
 
 @app.get("/")
 def root():

@@ -20,10 +20,10 @@ class AgentTools:
     Injected with db session and services at construction time.
     """
 
-    def __init__(self, db, rag_service, gemini_model=None):
+    def __init__(self, db, rag_service, groq_client=None):
         self.db = db
         self.rag = rag_service
-        self.gemini = gemini_model  # used only by draft_reply
+        self.groq = groq_client
 
     # ── Tool registry ─────────────────────────────────────────────────────────
 
@@ -45,20 +45,23 @@ class AgentTools:
     # ── Tool 1: search_knowledge_base ─────────────────────────────────────────
 
     def search_knowledge_base(self, query: str) -> str:
-        """RAG search across internal knowledge base documents."""
         try:
             results = self.rag.retrieve(query, top_k=3)
             if not results:
                 return "No relevant knowledge base entries found."
             parts = []
             for i, r in enumerate(results, 1):
+                # Handle both key naming conventions
+                source = r.get("source_doc", r.get("source", "unknown"))
+                score = r.get("similarity_score", r.get("score", 0.0))
+                text = r.get("chunk_text", r.get("text", ""))
                 parts.append(
-                    f"[{i}] Source: {r['source_doc']} (similarity: {r['score']:.2f})\n{r['text']}"
+                    f"[{i}] Source: {source} (similarity: {score:.2f})\n{text}"
                 )
             return "\n\n".join(parts)
         except Exception as e:
-            logger.error(f"search_knowledge_base failed: {e}")
-            return f"Knowledge base search failed: {str(e)}"
+             logger.error(f"search_knowledge_base failed: {e}")
+        return f"Knowledge base search failed: {str(e)}"
 
     # ── Tool 2: get_thread_history ────────────────────────────────────────────
 
@@ -173,15 +176,13 @@ class AgentTools:
                 context=context,
             )
 
-            if self.gemini:
-                response = self.gemini.generate_content(prompt)
-                draft = response.text.strip()
-            else:
-                draft = (
-                    f"[Draft reply — Gemini not available]\n"
-                    f"Context: {context[:200]}\n"
-                    f"Policy refs: {policy_refs}"
-                )
+            if self.groq:
+                        response = self.groq.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=512,
+                        )
+                        draft = response.choices[0].message.content.strip()
 
             return f"Draft reply generated:\n\n{draft}"
         except Exception as e:
