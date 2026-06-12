@@ -1,78 +1,54 @@
 # Python
-
-**pycache**/
+__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 
 # Virtual Environments
-
 venv/
-.env/
 .venv/
 
 # Environment Variables
-
 .env
+.env.*
+!.env.example
 
 # FastAPI / Logs
-
 *.log
 
 # VS Code
-
 .vscode/
 
 # JetBrains
-
 .idea/
 
 # OS Files
-
 .DS_Store
 Thumbs.db
 
 # Python Packaging
-
 build/
 dist/
 *.egg-info/
 
 # Frontend
-
 node_modules/
 frontend/node_modules/
-
-# Vite
-
 frontend/dist/
 
 # Testing
-
 .pytest_cache/
 .coverage
 
-# Database
-
+# Databases
 *.db
 *.sqlite3
-# ChromaDB vector store
+
+# ChromaDB
 chroma_db/
 
-# Alembic
+# Alembic Cache
 migrations/versions/__pycache__/
 
-# PostgreSQL
+# SQL Dumps
 *.sql
-
-# Secrets
-*.env
-.env.*
-!.env.example
-
-# Python compiled
-__pycache__/
-*.pyc
-
-# Byte-compiled
-*.pyo
