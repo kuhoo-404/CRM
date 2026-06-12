@@ -206,58 +206,7 @@ curl -X POST http://localhost:8000/api/ingest \
 ---
 
 ## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        EMAIL INGESTION                           │
-│  POST /api/ingest → Schema Validation → Deduplication           │
-│       → Heuristic Filter → Contact Upsert → Thread Link         │
-│       → Persist to PostgreSQL → Audit Log                       │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-              ┌────────────▼────────────┐
-              │   HEURISTIC FILTER      │
-              │  (sub-10ms, no LLM)     │
-              │  Spam / Security /      │
-              │  Legal / Urgency        │
-              └────────────┬────────────┘
-                           │
-         ┌─────────────────▼──────────────────┐
-         │         LLM CLASSIFIER              │
-         │  RAG Retrieval (ChromaDB)           │
-         │  → top-3 policy chunks              │
-         │  → Thread history                   │
-         │  → Groq llama-3.3-70b              │
-         │  → Structured JSON output           │
-         │  → Save: category, sentiment,       │
-         │    urgency, confidence              │
-         └─────────────────┬──────────────────┘
-                           │
-         ┌─────────────────▼──────────────────┐
-         │       AUTONOMOUS AGENT              │
-         │  ReAct loop (max 6 steps)           │
-         │  Tools: search_kb, get_thread,      │
-         │  get_contact, check_account,        │
-         │  draft_reply, escalate_to_human,    │
-         │  flag_for_legal, create_ticket,     │
-         │  send_auto_reply                    │
-         │  → Reasoning trace stored in DB     │
-         └─────────────────┬──────────────────┘
-                           │
-    ┌──────────────────────▼──────────────────────┐
-    │              POSTGRESQL                      │
-    │  7 tables: contacts, threads, emails,        │
-    │  actions, knowledge_chunks,                  │
-    │  web_intelligence_cache, audit_log           │
-    └──────────────────────┬──────────────────────┘
-                           │
-    ┌──────────────────────▼──────────────────────┐
-    │           REACT FRONTEND                     │
-    │  View 1: Mission Control Inbox               │
-    │  View 2: Thread Workspace + Agent Trace      │
-    │  View 3: Analytics Dashboard                 │
-    └─────────────────────────────────────────────┘
-```
+![ Architecture Overview](assets/architecture_overview.png)
 
 ---
 
