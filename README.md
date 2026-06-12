@@ -8,13 +8,12 @@
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
-2. [Environment Variables](#environment-variables)
-3. [How to Seed the Knowledge Base](#how-to-seed-the-knowledge-base)
-4. [How to Run the Email Simulation](#how-to-run-the-email-simulation)
-5. [Architecture Overview](#architecture-overview)
-6. [Architecture Decisions & Trade-offs](#architecture-decisions--trade-offs)
-7. [Known Limitations](#known-limitations)
-8. [API Reference](#api-reference)
+2. [How to Seed the Knowledge Base](#how-to-seed-the-knowledge-base)
+3. [How to Run the Email Simulation](#how-to-run-the-email-simulation)
+4. [Architecture Overview](#architecture-overview)
+5. [Architecture Decisions & Trade-offs](#architecture-decisions--trade-offs)
+6. [Known Limitations](#known-limitations)
+7. [API Reference](#api-reference)
 
 ---
 
@@ -131,24 +130,7 @@ Frontend available at: **http://localhost:5173**
 
 ---
 
-## Environment Variables
 
-| Variable | Description | Example |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:password@localhost:5432/senai_crm` |
-| `GROQ_API_KEY` | Groq API key for LLM calls | `gsk_...` |
-| `GEMINI_API_KEY` | Google Gemini API key (optional fallback) | `AIza...` |
-| `ANTHROPIC_API_KEY` | Anthropic API key (optional fallback) | `sk-ant-...` |
-| `APP_ENV` | Environment (`development` / `production`) | `development` |
-| `LOG_LEVEL` | Logging level | `INFO` |
-| `CHROMA_PERSIST_DIR` | ChromaDB storage path | `./chroma_db` |
-| `KB_DIR` | Knowledge base documents directory | `./knowledge_base` |
-| `CHUNK_SIZE` | RAG chunk size in tokens | `400` |
-| `CHUNK_OVERLAP` | Overlap between chunks | `50` |
-| `RAG_TOP_K` | Number of chunks to retrieve per query | `3` |
-| `SCRAPER_CACHE_TTL` | Web scraper cache TTL in seconds | `21600` |
-
----
 
 ## How to Seed the Knowledge Base
 
